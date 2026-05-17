@@ -5,6 +5,28 @@ import { analyzeWorkload } from './utils/scheduler.js';
 
 initGlobalErrorBoundary();
 
+function getLabelColor(labelStr) {
+  const colors = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ec4899', '#14b8a6', '#f97316'];
+  let hash = 0;
+  for (let i = 0; i < labelStr.length; i++) {
+    hash = labelStr.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function extractLabels(title) {
+  const labelRegex = /#([\w-]+)/g;
+  let match;
+  const labels = [];
+  while ((match = labelRegex.exec(title)) !== null) {
+    labels.push(match[1]);
+  }
+  const cleanTitle = title.replace(labelRegex, '').trim();
+  return { cleanTitle, labels };
+}
+
+let activeLabelFilter = '';
+
 function generateSummary(tasks, subjects) {
   const now = new Date();
   const weekEnd = new Date();
@@ -64,8 +86,14 @@ const clearBtn = document.getElementById('clear-btn');
 const addItemsBtn = document.getElementById('add-btn');
 const downloadBtn = document.getElementById('download-btn');
 const newTaskBtn = document.getElementById('add-task-btn');
+const labelFilterSelect = document.getElementById('label-filter');
 
-
+if (labelFilterSelect) {
+  labelFilterSelect.addEventListener('change', (e) => {
+    activeLabelFilter = e.target.value;
+    renderTasks();
+  });
+}
 
 const SUBJECT_COLORS = [
   'var(--color-text-info)',
@@ -404,7 +432,29 @@ function renderTasks() {
     archivedBadge.textContent = archivedTasks.length;
   }
   
-  const displayTasks = currentView === 'archived' ? archivedTasks : activeTasks;
+  const displayTasksRaw = currentView === 'archived' ? archivedTasks : activeTasks;
+  const displayTasks = activeLabelFilter
+    ? displayTasksRaw.filter(t => t.labels && t.labels.includes(activeLabelFilter))
+    : displayTasksRaw;
+
+  // Extract unique labels to populate the filter dropdown
+  if (labelFilterSelect) {
+    const uniqueLabels = new Set();
+    store.tasks.forEach(t => {
+      if (t.labels && Array.isArray(t.labels)) {
+        t.labels.forEach(l => uniqueLabels.add(l));
+      }
+    });
+    
+    // Store current selection to restore it
+    const currentSel = labelFilterSelect.value;
+    let optionsHtml = '<option value="">All Labels</option>';
+    Array.from(uniqueLabels).sort().forEach(lbl => {
+      optionsHtml += `<option value="${lbl}" ${lbl === currentSel ? 'selected' : ''}>${lbl}</option>`;
+    });
+    labelFilterSelect.innerHTML = optionsHtml;
+  }
+
   const sorted = [...displayTasks].sort((a,b) => new Date(a.due_at) - new Date(b.due_at));
   
   const now = new Date(); 
@@ -513,6 +563,11 @@ function renderTasks() {
              <button class="task-btn task-btn-info restore-task-btn" data-id="${t.id}" title="Restore">Restore</button>
              <button class="task-btn task-btn-danger delete-task-btn" data-id="${t.id}" title="Permanent Delete">Delete</button>`;
 
+        let labelsHtml = '';
+        if (t.labels && Array.isArray(t.labels)) {
+          labelsHtml = t.labels.map(l => `<span class="task-pill" style="background:${getLabelColor(l)}; color:white;">${l}</span>`).join(' ');
+        }
+
         html += `
           <div class="task-item ${isUrgent ? 'urgent' : ''} ${isDone ? 'done' : ''}" data-id="${t.id}">
             <div class="task-check ${isDone ? 'done' : ''}"></div>
@@ -521,6 +576,7 @@ function renderTasks() {
               <div class="task-meta">
                 <span class="task-pill ${isDone ? 'pill-green' : (isUrgent ? 'pill-red' : 'pill-amber')}">${isDone ? 'Done' : 'Due ' + formatDate(t.due_at)}</span>
                 <span class="task-pill ${pillClass}">${sub.short_code}</span>
+                ${labelsHtml}
               </div>
             </div>
             <div class="task-actions">
@@ -562,7 +618,7 @@ function renderTasks() {
       : '';
 
     tasksSection.innerHTML = actionBar +
-                             renderGroup(titlePrefix + '⚠ Due soon', dueSoon, 'var(--color-text-danger)', true)
+                             renderGroup(titlePrefix + '⚠ Due soon', dueSoon, 'var(--color-text-danger)', true) +
                              renderGroup(titlePrefix + 'This week', thisWeek, 'var(--color-text-secondary)', true) +
                              renderGroup(titlePrefix + 'Completed', completed, 'var(--color-text-tertiary)') +
                              emptyState;
@@ -600,18 +656,21 @@ function renderTasks() {
       const taskId = el.dataset.id;
       const itemEl = el.closest('.task-item');
       
-      const title = itemEl.querySelector('.board-edit-title').value;
+      const rawTitle = itemEl.querySelector('.board-edit-title').value;
       const subject_id = itemEl.querySelector('.board-edit-subject').value;
       let dateVal = itemEl.querySelector('.board-edit-date').value;
       const notes = itemEl.querySelector('.board-edit-notes').value;
       const priority = itemEl.querySelector('.board-edit-priority').value;
       
+      const { cleanTitle, labels } = extractLabels(rawTitle);
+      
       store.updateTask(taskId, {
-        title,
+        title: cleanTitle || rawTitle,
         subject_id,
         due_at: dateVal ? new Date(dateVal).toISOString() : '',
         notes,
-        priority
+        priority,
+        labels
       });
     });
   });
@@ -1010,26 +1069,28 @@ newTaskModal.addEventListener('click', (e) => {
 });
 
 newTaskSave.addEventListener('click', async () => {
-  const title = newTaskTitle.value.trim();
+  const rawTitle = newTaskTitle.value.trim();
   const subject_id = newTaskSubject.value;
   const notes = newTaskNotes.value.trim();
   const dateVal = newTaskDate.value;
 
-  if (!title) {
+  if (!rawTitle) {
     alert('Please enter a task name');
     return;
   }
 
+  const { cleanTitle, labels } = extractLabels(rawTitle);
   const due_at = dateVal ? new Date(dateVal).toISOString() : '';
 
   const newTask = {
-    title,
+    title: cleanTitle || rawTitle,
     subject_id,
     due_at,
     notes,
     priority: 'medium',
     status: 'Not Started',
-    archived: 0
+    archived: 0,
+    labels
   };
 
   await store.addTasks([newTask]);

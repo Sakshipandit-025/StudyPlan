@@ -274,6 +274,13 @@ app.post('/api/subjects', (req, res) => {
 app.get('/api/tasks', (req, res) => {
   db.all('SELECT * FROM tasks ORDER BY due_at ASC', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
+    rows.forEach(r => {
+      try {
+        r.labels = JSON.parse(r.labels || '[]');
+      } catch(e) {
+        r.labels = [];
+      }
+    });
     res.json(rows);
   });
 });
@@ -292,8 +299,8 @@ app.post('/api/tasks', (req, res) => {
     let errors = [];
 
     const stmt = db.prepare(`INSERT INTO tasks 
-      (id, subject_id, title, due_at, status, priority, confidence_score, notes) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+      (id, subject_id, title, due_at, status, priority, confidence_score, notes, labels) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
     let pending = tasks.length;
 
@@ -330,6 +337,7 @@ app.post('/api/tasks', (req, res) => {
               t.priority || 'medium',
               t.confidence_score || 100,
               t.notes || '',
+              typeof t.labels === 'string' ? t.labels : JSON.stringify(t.labels || []),
               function (insertErr) {
                 if (insertErr) {
                   errors.push({ task: t, error: insertErr.message });
@@ -371,7 +379,7 @@ app.post('/api/tasks', (req, res) => {
 
 // ================= UPDATE =================
 app.put('/api/tasks/:id', (req, res) => {
-  const { status, archived, title, subject_id, due_at, notes, priority } = req.body;
+  const { status, archived, title, subject_id, due_at, notes, priority, labels } = req.body;
 
   let query = 'UPDATE tasks SET ';
   const params = [];
@@ -384,6 +392,7 @@ app.put('/api/tasks/:id', (req, res) => {
   if (due_at !== undefined) { updates.push('due_at = ?'); params.push(due_at); }
   if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
   if (priority !== undefined) { updates.push('priority = ?'); params.push(priority); }
+  if (labels !== undefined) { updates.push('labels = ?'); params.push(typeof labels === 'string' ? labels : JSON.stringify(labels)); }
 
   if (updates.length === 0) {
     return res.status(400).json({ error: 'No fields to update' });
