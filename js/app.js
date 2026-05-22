@@ -510,8 +510,10 @@ function renderTasks() {
       
     items.forEach(t => {
       const sub = subjects.find(s => s.id === t.subject_id) || subjects[0];
-      const isUrgent = t.priority === 'high' && title === '⚠ Due soon';
       const isDone = t.status === 'Done';
+      const isHighPriority = t.priority === 'high';
+      const isOverdue = !isDone && t.due_at && new Date(t.due_at) < now;
+      const isUrgent = isHighPriority && title === '⚠ Due soon';
       
       let pillClass = '';
       if(sub.short_code === 'CS') pillClass = 'pill-blue';
@@ -525,10 +527,9 @@ function renderTasks() {
         ).join('');
         
         const localDate = t.due_at ? new Date(t.due_at).toISOString().substring(0, 16) : '';
-        const isHighPriority = t.priority === 'high';
         
         html += `
-          <div class="task-item" style="display:block; padding:12px; cursor:default;" data-id="${t.id}">
+          <div class="task-item editing" style="display:block; padding:12px; cursor:default;" data-id="${t.id}">
             <label style="display:block; font-size:10px; font-weight:700; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Subject</label>
             <select class="board-edit-subject edit-field" style="width:100%; margin-bottom: 12px; font-size:12px; padding:4px; border: 1px solid var(--color-border-secondary); border-radius: 4px; background: var(--color-background-primary); color: var(--color-text-primary);">
               ${subjectOptions}
@@ -556,12 +557,13 @@ function renderTasks() {
           </div>
         `;
       } else {
-        const archiveBtn = !t.archived 
-          ? `<button class="task-btn edit-task-btn" data-id="${t.id}" title="Edit">✏️ Edit</button>
-             <button class="task-btn archive-task-btn" data-id="${t.id}" title="Archive">Archive</button>`
-          : `<button class="task-btn edit-task-btn" data-id="${t.id}" title="Edit">✏️ Edit</button>
+        const actionButtons = !t.archived 
+          ? `<button class="task-btn edit-task-btn" data-id="${t.id}" title="Edit">Edit</button>
+             <button class="task-btn archive-task-btn" data-id="${t.id}" title="Archive">Archive</button>
+             <button class="task-btn delete-task-btn" data-id="${t.id}" title="Delete">Delete</button>`
+          : `<button class="task-btn edit-task-btn" data-id="${t.id}" title="Edit">Edit</button>
              <button class="task-btn task-btn-info restore-task-btn" data-id="${t.id}" title="Restore">Restore</button>
-             <button class="task-btn task-btn-danger delete-task-btn" data-id="${t.id}" title="Permanent Delete">Delete</button>`;
+             <button class="task-btn task-btn-danger delete-task-btn" data-id="${t.id}" title="Delete">Delete</button>`;
 
         let labelsHtml = '';
         if (t.labels && Array.isArray(t.labels)) {
@@ -569,18 +571,18 @@ function renderTasks() {
         }
 
         html += `
-          <div class="task-item ${isUrgent ? 'urgent' : ''} ${isDone ? 'done' : ''}" data-id="${t.id}">
+          <div class="task-item ${isUrgent ? 'urgent' : ''} ${isHighPriority ? 'high-priority' : ''} ${isOverdue ? 'overdue' : ''} ${isDone ? 'done' : ''}" data-id="${t.id}">
             <div class="task-check ${isDone ? 'done' : ''}"></div>
             <div class="task-info">
               <div class="task-name">${t.title}</div>
               <div class="task-meta">
-                <span class="task-pill ${isDone ? 'pill-green' : (isUrgent ? 'pill-red' : 'pill-amber')}">${isDone ? 'Done' : 'Due ' + formatDate(t.due_at)}</span>
+                <span class="task-pill ${isDone ? 'pill-green' : (isOverdue || isHighPriority ? 'pill-red' : 'pill-amber')}">${isDone ? 'Done' : 'Due ' + formatDate(t.due_at)}</span>
                 <span class="task-pill ${pillClass}">${sub.short_code}</span>
                 ${labelsHtml}
               </div>
             </div>
             <div class="task-actions">
-              ${archiveBtn}
+              ${actionButtons}
             </div>
           </div>
         `;
